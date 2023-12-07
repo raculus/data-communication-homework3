@@ -5,6 +5,7 @@ import logging
 import os
 import ping3
 from threading import Thread
+from file_chunk import *
 
 HOST = "192.168.219.117"
 PORT = 9999
@@ -64,30 +65,47 @@ def p2p_client_threaded(address):
     다른 서버에 접속하기 위한 스레드 (클라이언트 스레드)
     """
     # 서버에 연결
-    socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     # 연결 수립
-    socket.connect(address)
+    sock.connect(address)
 
+    my_file_name = os.listdir(f"Client{index}")[0]
     while True:
-        data = socket.recv(1024)
+        data = sock.recv(1024)
         if not data:
-            log.info(f"Disconnected by{p2p_clients.index(socket)}")
+            log.info(f"Disconnected by{p2p_clients.index(sock)}")
             break
         data = pickle.loads(data)
-        log.debug(f"p2p_thread data: {data}")
+        log.debug(f"p2p_cleint_thread data: {data}")
+        log.info(f"Send file to Client")
+        send_file(f"Client{index}", my_file_name, sock)
 
 
-def p2p_server_threaded(socket):
+def p2p_server_threaded(sock):
     """
     다른 클라이언트를 받기 위한 스레드 (서버 스레드)
     """
+    sock.sendall(pickle.dumps(p2p_server_socket.getsockname()))
     while True:
-        data = socket.recv(1024)
+        data = sock.recv(1024)
         if not data:
-            log.info(f"Disconnected by{p2p_clients.index(socket)}")
+            log.info(f"Disconnected by{p2p_clients.index(sock)}")
             break
         data = pickle.loads(data)
-        log.debug(f"p2p_thread data: {data}")
+        if "file_size" in data:
+            file_size = data["file_size"]
+            file_name = data["file_name"]
+            file_path = f"Client{index}/{file_name}"
+            print(f"Receiving File: {file_size}")
+            received_data = b""
+            while True:
+                chunk = sock.recv(CHUNK_SIZE)
+                if not chunk:
+                    break
+                received_data += chunk
+                log.info(f"Received {len(received_data)} bytes")
+            with open(file_path, "wb") as file:
+              file.write(received_data)
 
 
 def p2p_server():
@@ -111,7 +129,7 @@ def send_file_list(dest_client):
     file_list = os.listdir(f"Client{index}")
     dic = {"file_list": file_list}
     dest_client.sendall(pickle.dumps(dic))
-    log.info(f"Send file list to Client{dest_client}")
+    log.info(f"Send file list to Client{client_list.index(dest_client)}")
 
 
 def recv_client_list(client_socket):
