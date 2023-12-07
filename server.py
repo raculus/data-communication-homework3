@@ -1,8 +1,8 @@
 import socket
-from _thread import *
 import os
 import pickle
 import logging
+from threading import Thread
 
 FILENAME = "Server.txt"
 if os.path.exists(FILENAME):
@@ -28,12 +28,8 @@ for i in range(1, 5):
         os.mkdir(f"Client{i}")
 
 
-def get_client_index(client_socket):
-    return client_sockets.index(client_socket) + 1
-
-
 def threaded(client_socket, addr):
-    index = get_client_index(client_socket)
+    index = client_sockets.index(client_socket) + 1
     name = f"Client{index}"
     dic = {"index": index}
     client_socket.sendall(pickle.dumps(dic))
@@ -64,28 +60,32 @@ def server():
     server_socket.bind((HOST, PORT))
     server_socket.listen()
     log.info("Wait join client")
-    print()
-    try:
-        while True:
-            client_socket, addr = server_socket.accept()
-            client_sockets.append(client_socket)
-            start_new_thread(threaded, (client_socket, addr))
-            log.info(f"Join {addr[0]} (Client{client_sockets.index(client_socket)+1})")
-            if len(client_sockets) == 4:
-                log.info("All clients joined")
-                for client in client_sockets:
-                    # client_sockets에서 client를 제외한 나머지 client 리스트
-                    clientList = [
-                        c.getpeername() for c in client_sockets if c != client
-                    ]
-                    client.sendall(pickle.dumps({"clients": clientList}))
-                    log.info(
-                        f"Send client list to Client{client_sockets.index(client)+1}:{client.getpeername()[1]}"
-                    )
-                    log.debug(clientList)
+    while True:
+        client_socket, addr = server_socket.accept()
+        client_sockets.append(client_socket)
 
-    except Exception as e:
-        log.error(e)
+        client_thread = Thread(
+            target=threaded,
+            args=(
+                client_socket,
+                addr,
+            ),
+        )
+        client_thread.daemon = True
+        client_thread.name = f"Client{client_sockets.index(client_socket)+1}"
+        client_thread.start()
+
+        log.info(f"Join {addr[0]} (Client{client_sockets.index(client_socket)+1})")
+        if len(client_sockets) == 4:
+            log.info("All clients joined")
+            for client in client_sockets:
+                # client_sockets에서 client를 제외한 나머지 client 리스트
+                clientList = [c.getpeername() for c in client_sockets if c != client]
+                client.sendall(pickle.dumps({"clients": clientList}))
+                log.info(
+                    f"Send client list to Client{client_sockets.index(client)+1}:{client.getpeername()[1]}"
+                )
+                log.debug(clientList)
 
 
 def close():

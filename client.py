@@ -1,17 +1,15 @@
 import socket
-from _thread import *
 import sys
 import pickle
 import logging
 import os
 import ping3
+from threading import Thread
 
 HOST = "192.168.219.117"
 PORT = 9999
 
-if len(sys.argv) == 2:
-    HOST = sys.argv[1]
-
+# IP를 인자로 받음
 arg = sys.argv
 if len(arg) == 2:
     HOST = arg[1]
@@ -36,12 +34,12 @@ p2p_server_socket.listen()
 
 p2p_clients = []
 
-# 클라이언트 이름 지정, 로그 생성
+# 서버로 부터 클라이언트 이름 지정 받고, 로그 생성
 while True:
     data = client_socket.recv(1024)
     if not data:
-        print("not data")
-        continue
+        log.error("not data")
+        break
     data = pickle.loads(data)
     if "index" in data:
         index = data["index"]
@@ -61,29 +59,59 @@ while True:
         break
 
 
-def p2p_thread(p2p):
+def p2p_client_threaded(address):
+    """
+    다른 서버에 접속하기 위한 스레드 (클라이언트 스레드)
+    """
+    # 서버에 연결
+    socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # 연결 수립
+    socket.connect(address)
+
     while True:
-        continue
-        data = p2p.recv(1024)
+        data = socket.recv(1024)
         if not data:
-            log.debug("p2p thread: not data")
-            os._exit(1)
+            log.info(f"Disconnected by{p2p_clients.index(socket)}")
+            break
         data = pickle.loads(data)
-        print(data)
+        log.debug(f"p2p_thread data: {data}")
+
+
+def p2p_server_threaded(socket):
+    """
+    다른 클라이언트를 받기 위한 스레드 (서버 스레드)
+    """
+    while True:
+        data = socket.recv(1024)
+        if not data:
+            log.info(f"Disconnected by{p2p_clients.index(socket)}")
+            break
+        data = pickle.loads(data)
+        log.debug(f"p2p_thread data: {data}")
 
 
 def p2p_server():
+    """
+    서버를 구동하여 클라이언트 연결을 수락하는 스레드
+    """
     while True:
+        # 클라이언트 연결 수락
         p2p, addr = p2p_server_socket.accept()
         p2p_clients.append(p2p)
-        log.info(f"Connected by {p2p.getpeername()}")
-        start_new_thread(p2p_thread, (p2p,))
+        log.info(f"Connected Client{p2p_clients.index(p2p)+1}")
+
+        # 클라이언트마다 스레드 생성
+        p2p_thread = Thread(target=p2p_server_threaded, args=(p2p,))
+        p2p_thread.daemon = True
+        p2p_thread.name = f"p2p_thread{p2p_clients.index(p2p)+1}"
+        p2p_thread.start()
 
 
 def send_file_list(dest_client):
     file_list = os.listdir(f"Client{index}")
     dic = {"file_list": file_list}
     dest_client.sendall(pickle.dumps(dic))
+    log.info(f"Send file list to Client{dest_client}")
 
 
 def recv_client_list(client_socket):
@@ -99,34 +127,33 @@ def recv_client_list(client_socket):
         client_list = data["clients"]
         for client in client_list:
             log.info(f"Trying to connect {client}")
-            # 서버에 연결
-            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            # 연결 수립
-            client_socket.connect(client)
+            p2p_client_thread = Thread(target=p2p_client_threaded, args=(client,))
+            p2p_client_thread.daemon = True
+            p2p_client_thread.name = f"p2p_client_thread{client_list.index(client)+1}"
+            p2p_client_thread.start()
         continue
 
-        # client_list = [(127.0.0.1, 1234), (192.168.0.1, 4567), (...)]
-        ping_list = [ping3.ping(client[0]) for client in client_list]
-        # pingList = [0.5, 0.1, 0.0, ...]
 
-        zipped_lists = zip(ping_list, client_list)
+def sort_client_list_by_ping(client_list):
+    # client_list = [(127.0.0.1, 1234), (192.168.0.1, 4567), (...)]
+    ping_list = [ping3.ping(client[0]) for client in client_list]
+    # pingList = [0.5, 0.1, 0.0, ...]
 
-        # zip된 리스트를 ping 기준으로 정렬
-        sorted_pairs = sorted(zipped_lists)
+    zipped_lists = zip(ping_list, client_list)
 
-        # 정렬된 리스트에서 client_list만 추출
-        client_list = [item[1] for item in sorted_pairs]
-        return client_list
+    # zip된 리스트를 ping 기준으로 정렬
+    sorted_pairs = sorted(zipped_lists)
 
-
-def find_files(client_socket, client_list):
-    for client in client_list:
-        data = client_socket.recv(1024)
-        if not data:
-            log.debug("find_files: not data")
-            continue
-        data = pickle.loads(data)
+    # 정렬된 리스트에서 client_list만 추출
+    client_list = [item[1] for item in sorted_pairs]
+    return client_list
 
 
-start_new_thread(p2p_server, ())
+# 서버를 위한 스레드 생성
+p2p_server_thread = Thread(target=p2p_server)
+p2p_server_thread.daemon = True
+p2p_server_thread.name = "p2p_server"
+p2p_server_thread.start()
+
 client_list = recv_client_list(client_socket)
+log.info(f"Client{index} close")
