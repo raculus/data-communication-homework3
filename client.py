@@ -78,7 +78,7 @@ def p2p_client_threaded(address):
         data = pickle.loads(data)
         log.debug(f"p2p_cleint_thread data: {data}")
         log.info(f"Send file to Client")
-        send_file(f"Client{index}", my_file_name, sock)
+        send_file(f"Client{index}", my_file_name, sock, log)
 
 
 def p2p_server_threaded(sock):
@@ -103,7 +103,9 @@ def p2p_server_threaded(sock):
                 if not chunk:
                     break
                 received_data += chunk
-                log.info(f"Received {len(received_data)} bytes")
+                log.info(f"Received {file_name} {len(received_data)}/{file_size} bytes")
+                if(len(received_data) >= file_size):
+                    break
             with open(file_path, "wb") as file:
               file.write(received_data)
 

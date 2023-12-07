@@ -18,7 +18,7 @@ def send_chunk(chunk, client_socket):
     pass
 
 
-def send_file(file_path, file_name, client_socket):
+def send_file(file_path, file_name, client_socket, log):
     """
     파일 전송 함수
     """
@@ -33,5 +33,6 @@ def send_file(file_path, file_name, client_socket):
             if not chunk:
                 break
             client_socket.sendall(chunk)
+            log.info(f"Sent {file_name} {len(chunk)} bytes")
             progress_bar.update(len(chunk))
         progress_bar.close()
